@@ -1,0 +1,58 @@
+name: Publish English offline app
+
+on:
+  push:
+    branches: [main]
+    paths: [english-offline.zip, .github/workflows/deploy.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Verify and unpack the public release
+        run: |
+          echo 'ca519b62e467daab7cd0c4fd9e7128221f75de0458c1ba70e0e061b8ab95e8a1  english-offline.zip' | sha256sum --check
+          unzip -q english-offline.zip -d site
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path('site').resolve()
+          release = json.loads((root / 'release.json').read_text())
+          assert release['format'] == 'language-room-english-offline'
+          for asset in release['shell'] + release['audio']:
+              file = (root / asset['path']).resolve()
+              assert file.is_relative_to(root)
+              data = file.read_bytes()
+              assert len(data) == asset['bytes']
+              assert hashlib.sha256(data).hexdigest() == asset['sha256']
+          document = json.loads((root / 'english.json').read_text())
+          assert release['version'] == document['version']
+          assert len(document['course']['entries']) == 1000
+          print('Verified release', release['version'])
+          PY
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish installation URL
+        id: deployment
+        uses: actions/deploy-pages@v4
